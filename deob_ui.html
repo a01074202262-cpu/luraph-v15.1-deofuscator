@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Luraph v15 Deobfuscator</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--card:#f6f6f4;--bd:#d9d9d4;--acc:#2f6fed;--acc-fg:#fff;--ok:#1a7f37;--err:#c62828;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#eaeaea;--mut:#9a9a9a;--card:#202020;--bd:#363636;--acc:#5b8cff;--acc-fg:#0b0b0b;--ok:#4cc16a;--err:#ff6b6b;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px}
+.card h2{font-size:13px;margin:0 0 8px;color:var(--mut);font-weight:600;letter-spacing:.02em}
+textarea{width:100%;height:320px;resize:vertical;background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:8px;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace}
+#drop{border:1.5px dashed var(--bd);border-radius:8px;padding:10px;text-align:center;color:var(--mut);margin-bottom:8px;cursor:pointer}
+#drop.over{border-color:var(--acc);color:var(--acc)}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 14px;margin:12px 0}
+.opts label{display:flex;align-items:center;gap:6px;color:var(--fg)}
+.opts input[type=number],.opts select{width:80px;background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button{background:var(--acc);color:var(--acc-fg);border:0;border-radius:8px;padding:8px 16px;font-weight:600;cursor:pointer}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--bd)}
+button:disabled{opacity:.5;cursor:default}
+#status{color:var(--mut)}
+#status.ok{color:var(--ok)} #status.err{color:var(--err)}
+pre#log{margin:0;height:150px;overflow:auto;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap}
+.banner{background:var(--card);border:1px solid var(--err);color:var(--err);padding:8px 12px;border-radius:8px;margin-bottom:12px;display:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>Luraph v15 Deobfuscator</h1>
+  <p class="sub">복원은 내 PC에서 실행 중인 서버(<code>deob_server.js</code>)가 처리합니다. 입력은 작업이 끝나면 서버에서 삭제됩니다.</p>
+  <div class="banner" id="banner">서버에 연결할 수 없습니다. 서비스가 깨어나는 중이면(무료 플랜) 잠시 후 새로고침하세요.</div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>입력 (난독화된 .lua / .luau)</h2>
+      <div id="drop">파일을 여기에 끌어다 놓거나 클릭해서 선택<input id="file" type="file" accept=".lua,.luau,.txt" hidden></div>
+      <textarea id="src" placeholder="또는 여기에 붙여넣기" spellcheck="false"></textarea>
+    </section>
+    <section class="card">
+      <h2>결과</h2>
+      <textarea id="out" readonly placeholder="복원 결과가 여기에 표시됩니다" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="sec" id="copy" disabled>복사</button>
+        <button class="sec" id="save" disabled>.lua 저장</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="opts">
+    <label><input type="checkbox" id="noDevirt"> 행동 트레이스만 (--no-devirt)</label>
+    <label><input type="checkbox" id="noHooks"> 후킹 끄기 (--no-hooks)</label>
+    <label><input type="checkbox" id="noFold"> 상수 접기 끄기 (--no-fold)</label>
+    <label>최대 실행 <input type="number" id="maxRuns" value="12" min="1" max="50"></label>
+    <label>타임아웃(초) <input type="number" id="timeout" value="90" min="5"></label>
+    <label>예산(초) <input type="number" id="budget" value="30" min="5"></label>
+    <label>Executor
+      <select id="executor"><option>Wave</option><option>Synapse</option><option>Xeno</option><option>Solara</option></select></label>
+  </div>
+
+  <div class="row" style="margin-bottom:10px">
+    <input id="token" type="password" placeholder="Access token" autocomplete="off" style="display:none;width:200px;background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:7px 10px">
+    <button id="run">복원 실행</button>
+    <button class="sec" id="detect">난독화기만 판별</button>
+    <span id="status"></span>
+  </div>
+
+  <section class="card"><h2>진행 로그</h2><pre id="log"></pre></section>
+</main>
+
+<script>
+// When opened from the server this is same-origin; when opened as a local file it targets localhost.
+const API = location.protocol.startsWith('http') ? '' : 'http://127.0.0.1:8787';
+const $ = (id) => document.getElementById(id);
+let bytes = null;           // uploaded file bytes (preserved exactly); null = use textarea
+
+const store = {
+  get(k){ try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+  set(k, v){ try { localStorage.setItem(k, v); } catch {} },
+};
+$('token').value = store.get('deob_token');
+$('token').addEventListener('input', () => store.set('deob_token', $('token').value));
+fetch(API + '/api/health').then(r => r.json()).then(h => {
+  if(h.auth) $('token').style.display = '';
+}).catch(() => { $('banner').style.display = 'block'; });
+
+function setFile(f){
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    bytes = new Uint8Array(r.result);
+    $('src').value = new TextDecoder('latin1').decode(bytes.subarray(0, 4000)) + (bytes.length > 4000 ? '\n… (' + bytes.length.toLocaleString() + ' bytes loaded; preview truncated)' : '');
+    $('src').dataset.fromFile = '1';
+  };
+  r.readAsArrayBuffer(f);
+}
+$('drop').onclick = () => $('file').click();
+$('file').onchange = (e) => setFile(e.target.files[0]);
+['dragover','dragenter'].forEach(t => $('drop').addEventListener(t, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave','drop'].forEach(t => $('drop').addEventListener(t, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+$('drop').addEventListener('drop', e => setFile(e.dataTransfer.files[0]));
+$('src').addEventListener('input', () => { bytes = null; $('src').dataset.fromFile = ''; });
+
+function toB64(u8){
+  let s = ''; const step = 0x8000;
+  for(let i = 0; i < u8.length; i += step) s += String.fromCharCode.apply(null, u8.subarray(i, i + step));
+  return btoa(s);
+}
+function status(t, cls){ const s = $('status'); s.textContent = t; s.className = cls || ''; }
+function logLine(l){ const p = $('log'); p.textContent += l + '\n'; p.scrollTop = p.scrollHeight; }
+
+async function go(detectOnly){
+  const u8 = bytes || new TextEncoder().encode($('src').value);
+  if(!u8.length){ status('입력이 비어 있습니다', 'err'); return; }
+  $('log').textContent = ''; $('out').value = '';
+  ['copy','save'].forEach(i => $(i).disabled = true);
+  $('run').disabled = $('detect').disabled = true;
+  status('실행 중…');
+  const t0 = Date.now();
+  try{
+    const resp = await fetch(API + '/api/deobfuscate', {
+      method: 'POST', headers: {'content-type': 'application/json', 'x-access-token': $('token').value},
+      body: JSON.stringify({
+        data_b64: toB64(u8), detectOnly,
+        options: {
+          noDevirt: $('noDevirt').checked, noHooks: $('noHooks').checked, noFold: $('noFold').checked,
+          maxRuns: $('maxRuns').value, timeout: $('timeout').value, budget: $('budget').value, executor: $('executor').value,
+        },
+      }),
+    });
+    if(resp.status === 401){ $('token').style.display = ''; throw new Error('Access token이 올바르지 않습니다'); }
+    if(resp.status === 429) throw new Error('서버가 사용 중입니다. 잠시 후 다시 시도하세요');
+    if(!resp.ok){ let t = await resp.text(); try { t = JSON.parse(t).error || t; } catch {} throw new Error(t); }
+    const reader = resp.body.getReader(), dec = new TextDecoder();
+    let buf = '', finished = false;
+    for(;;){
+      const {value, done} = await reader.read();
+      if(done) break;
+      buf += dec.decode(value, {stream: true});
+      let i;
+      while((i = buf.indexOf('\n')) >= 0){
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        if(!line.trim()) continue;
+        const m = JSON.parse(line);
+        if(m.log) logLine(m.log);
+        if(m.done){
+          finished = true;
+          const sec = ((Date.now() - t0) / 1000).toFixed(1);
+          if(m.error) status('실패: ' + m.error, 'err');
+          else if(m.detectOnly) status('판별 완료 (' + sec + 's)', 'ok');
+          else { $('out').value = m.result; ['copy','save'].forEach(i => $(i).disabled = false); status('완료 (' + sec + 's)', 'ok'); }
+        }
+      }
+    }
+    if(!finished) status('서버 연결이 끊겼습니다', 'err');
+  }catch(e){
+    status('오류: ' + e.message, 'err'); $('banner').style.display = 'block';
+  }finally{
+    $('run').disabled = $('detect').disabled = false;
+  }
+}
+$('run').onclick = () => go(false);
+$('detect').onclick = () => go(true);
+$('copy').onclick = async () => { await navigator.clipboard.writeText($('out').value); status('복사됨', 'ok'); };
+$('save').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([$('out').value], {type: 'text/plain'}));
+  a.download = 'deobfuscated.lua'; a.click(); URL.revokeObjectURL(a.href);
+};
+</script>
+</body>
+</html>
